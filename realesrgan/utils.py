@@ -1,14 +1,39 @@
 import cv2
+import logging
 import math
 import numpy as np
 import os
 import queue
 import threading
 import torch
+
 from basicsr.utils.download_util import load_file_from_url
 from torch.nn import functional as F
 
+log = logging.getLogger(__name__)
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _check_cuda_context(step: str) -> None:
+    """
+    DEBUG. Check if CUDA context is not forked.
+    """
+    try:
+        context = torch.multiprocessing.get_context()
+        method = torch.multiprocessing.get_start_method()
+        log.debug('CUDA context on step %s is %s, with start method: %s',
+                  step, context, method)
+    except Exception as exc:
+        log.warning('Failed to check CUDA context: %s', exc)
+        return
+
+    try:
+        if method == 'fork':
+            torch.multiprocessing.set_start_method('spawn', force=True)
+            log.debug('CUDA start method reseted to: %s', torch.multiprocessing.get_start_method())
+
+    except Exception as exc:
+        log.warning('Failed to check CUDA context: %s', exc)
 
 
 class RealESRGANer():
@@ -45,6 +70,7 @@ class RealESRGANer():
         self.half = half
 
         # initialize model
+        _check_cuda_context(step='init_model')
         if gpu_id:
             self.device = torch.device(
                 f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu') if device is None else device
@@ -88,6 +114,7 @@ class RealESRGANer():
     def pre_process(self, img):
         """Pre-process, such as pre-pad and mod pad, so that the images can be divisible
         """
+        _check_cuda_context(step='pre_process')
         img = torch.from_numpy(np.transpose(img, (2, 0, 1))).float()
         self.img = img.unsqueeze(0).to(self.device)
         if self.half:
